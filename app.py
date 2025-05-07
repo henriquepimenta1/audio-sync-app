@@ -18,10 +18,17 @@ if uploaded_file:
     st.audio(uploaded_file, format='audio/mp3')
 
     # BPM e batidas
+   # BPM e batidas
+try:
     tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
     beat_times = librosa.frames_to_time(beat_frames, sr=sr).tolist()
     st.markdown(f"**BPM estimado:** `{round(tempo, 2)}`")
     st.markdown(f"**Batidas detectadas:** {len(beat_times)}")
+except Exception as e:
+    st.warning("⚠️ Não foi possível detectar o BPM.")
+    beat_times = []
+    tempo = None
+
 
     # Tonalidade
     chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
