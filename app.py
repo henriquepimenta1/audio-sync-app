@@ -61,7 +61,7 @@ except Exception as e:
     # Mudanças de tonalidade
     tonnetz = librosa.feature.tonnetz(y=y, sr=sr)
     segments = librosa.segment.agglomerative(tonnetz.T, k=6)
-    boundaries = librosa.segment.boundaries(segments)
+    boundaries = np.flatnonzero(np.diff(segments)) + 1
     tonal_changes = librosa.frames_to_time(boundaries, sr=sr).tolist()
     st.markdown(f"**Mudanças de tonalidade detectadas:** `{len(tonal_changes)}`")
 
