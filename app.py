@@ -1,91 +1,83 @@
-from flask import Flask, render_template, request, url_for
+import streamlit as st
 import librosa
-import librosa.display
-import os
-from werkzeug.utils import secure_filename
-import uuid
 import numpy as np
+import json
 import matplotlib.pyplot as plt
+import librosa.display
+from io import BytesIO
 
-app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'uploads'
+st.set_page_config(page_title="Analisador de Música", layout="centered")
+st.title("🎧 Detector de BPM, Tonalidade e Mudanças")
 
-@app.route('/', methods=['GET', 'POST'])
-def index():
-    bpm = None
-    beat_times = []
-    duration = 0
-    unique_name = None
-    key_name = None
-    waveform_name = None
+uploaded_file = st.file_uploader("Envie um arquivo de áudio", type=["mp3", "wav"])
 
-    if request.method == 'POST':
-        file = request.files['audio']
-        analise = request.form.get('analise')
-        
-        if file:
-            filename = secure_filename(file.filename)
-            unique_name = f"preview_{uuid.uuid4().hex}.mp3"
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
+if uploaded_file:
+    y, sr = librosa.load(uploaded_file, sr=None)
+    duration = librosa.get_duration(y=y, sr=sr)
 
-            preview_path = os.path.join('static', unique_name)
-            os.replace(filepath, preview_path)
+    st.audio(uploaded_file, format='audio/mp3')
 
-            y, sr = librosa.load(preview_path)
+    # BPM e batidas
+    tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
+    beat_times = librosa.frames_to_time(beat_frames, sr=sr).tolist()
+    st.markdown(f"**BPM estimado:** `{round(tempo, 2)}`")
+    st.markdown(f"**Batidas detectadas:** {len(beat_times)}")
 
-            # Geração da imagem da waveform (sempre)
-            waveform_path = os.path.join('static', f"waveform_{uuid.uuid4().hex}.png")
-            plt.figure(figsize=(10, 2))
-            librosa.display.waveshow(y, sr=sr, color='gray')
-            plt.axis('off')
-            plt.tight_layout()
-            plt.savefig(waveform_path, bbox_inches='tight', pad_inches=0)
-            plt.close()
-            waveform_name = os.path.basename(waveform_path)
+    # Tonalidade
+    chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+    chroma_mean = np.mean(chroma, axis=1)
 
-            if analise in ['bpm', 'ambos']:
-                tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
-                beat_times = librosa.frames_to_time(beat_frames, sr=sr).tolist()
-                duration = librosa.get_duration(y=y, sr=sr)
-                bpm = round(float(tempo), 2)
+    major_profile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09,
+                     2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
+    minor_profile = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53,
+                     2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
 
-            if analise in ['tonalidade', 'ambos']:
-                chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+    def estimate_key(chroma_mean, profile):
+        return np.argmax([np.corrcoef(np.roll(profile, i), chroma_mean)[0, 1] for i in range(12)])
 
-                major_profile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09,
-                                 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
-                minor_profile = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53,
-                                 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
+    major_score = estimate_key(chroma_mean, major_profile)
+    minor_score = estimate_key(chroma_mean, minor_profile)
 
-                chroma_mean = np.mean(chroma, axis=1)
+    if np.corrcoef(np.roll(major_profile, major_score), chroma_mean)[0, 1] > \
+       np.corrcoef(np.roll(minor_profile, minor_score), chroma_mean)[0, 1]:
+        mode = 'maior'
+        tonic = major_score
+    else:
+        mode = 'menor'
+        tonic = minor_score
 
-                def estimate_key(chroma_mean, profile):
-                    return np.argmax([np.corrcoef(np.roll(profile, i), chroma_mean)[0, 1]
-                                      for i in range(12)])
+    tonalidades = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#',
+                   'G', 'G#', 'A', 'A#', 'B']
+    key_name = f"{tonalidades[tonic]} {mode}"
+    st.markdown(f"**Tonalidade estimada:** `{key_name}`")
 
-                major_score = estimate_key(chroma_mean, major_profile)
-                minor_score = estimate_key(chroma_mean, minor_profile)
+    # Mudanças de tonalidade
+    tonnetz = librosa.feature.tonnetz(y=y, sr=sr)
+    segments = librosa.segment.agglomerative(tonnetz.T, k=6)
+    boundaries = librosa.segment.boundaries(segments)
+    tonal_changes = librosa.frames_to_time(boundaries, sr=sr).tolist()
+    st.markdown(f"**Mudanças de tonalidade detectadas:** `{len(tonal_changes)}`")
 
-                if np.corrcoef(np.roll(major_profile, major_score), chroma_mean)[0, 1] > \
-                   np.corrcoef(np.roll(minor_profile, minor_score), chroma_mean)[0, 1]:
-                    mode = 'maior'
-                    tonic = major_score
-                else:
-                    mode = 'menor'
-                    tonic = minor_score
+    # Plot waveform
+    fig, ax = plt.subplots(figsize=(10, 2))
+    librosa.display.waveshow(y, sr=sr, ax=ax, color='gray')
+    ax.set(title='Waveform')
+    ax.axis('off')
+    st.pyplot(fig)
 
-                tonalidades = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#',
-                               'G', 'G#', 'A', 'A#', 'B']
-                key_name = f"{tonalidades[tonic]} {mode}"
-
-    return render_template('index.html',
-                           bpm=bpm,
-                           beat_times=beat_times,
-                           duration=duration,
-                           preview_name=unique_name,
-                           key_name=key_name,
-                           waveform_name=waveform_name)
-
-if __name__ == '__main__':
-    app.run(debug=True)
+    # Exportar JSON
+    output = {
+        "bpm": round(tempo, 2),
+        "tonalidade": key_name,
+        "batidas": beat_times,
+        "tonal_changes": tonal_changes
+    }
+    json_bytes = BytesIO()
+    json_bytes.write(json.dumps(output, indent=2).encode())
+    json_bytes.seek(0)
+    st.download_button(
+        label="📥 Baixar JSON de sincronização",
+        data=json_bytes,
+        file_name="sync_data.json",
+        mime="application/json"
+    )
