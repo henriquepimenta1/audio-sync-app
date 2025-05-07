@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Detector de BPM</title>
+    <script src="https://unpkg.com/wavesurfer.js"></script>
+    <style>
+        #timeline {
+            position: relative;
+            height: 30px;
+            width: 100%;
+            background: #e0e0e0;
+            margin-top: 10px;
+            margin-bottom: 20px;
+        }
+        .marker {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            width: 2px;
+            background: red;
+        }
+        .playhead {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            width: 2px;
+            background: blue;
+        }
+    </style>
+</head>
+<body>
+    <h2>Detector de BPM</h2>
+    <form action="/" method="post" enctype="multipart/form-data">
+        <input type="file" name="audio" accept="audio/*" required>
+        <label for="analise">Tipo de Análise:</label>
+        <select name="analise" id="analise">
+            <option value="bpm">Detecção de BPM</option>
+            <option value="tonalidade">Tonalidade</option>
+            <option value="ambos">Ambos</option>
+        </select>
+        <button type="submit">Enviar e Analisar</button>
+    </form>
+
+    {% if bpm %}
+        <h3>BPM estimado: {{ bpm }}</h3>
+    {% endif %}
+
+    {% if key_name %}
+        <h3>Tonalidade estimada: {{ key_name }}</h3>
+    {% endif %}
+
+    {% if bpm and preview_name %}
+    <div id="waveform"></div>
+    <div style="margin-top: 10px;">
+        <button onclick="wavesurfer.playPause()">Play/Pause</button>
+    </div>
+
+    <div id="timeline">
+        <div id="playhead" class="playhead"></div>
+    </div>
+
+    <script>
+        const beatTimes = {{ beat_times | safe }};
+        const duration = {{ duration }};
+        const audioUrl = "{{ url_for('static', filename=preview_name) }}";
+
+        const wavesurfer = WaveSurfer.create({
+            container: '#waveform',
+            waveColor: '#888',
+            progressColor: '#555',
+            height: 100,
+            responsive: true
+        });
+
+        wavesurfer.load(audioUrl);
+
+        wavesurfer.on('ready', () => {
+            beatTimes.forEach(time => {
+                wavesurfer.addRegion({
+                    start: time,
+                    end: time + 0.05,
+                    color: 'rgba(255,0,0,0.6)'
+                });
+            });
+        });
+
+        const timeline = document.getElementById('timeline');
+        const playhead = document.getElementById('playhead');
+
+        wavesurfer.on('audioprocess', () => {
+            const currentTime = wavesurfer.getCurrentTime();
+            const percent = (currentTime / duration) * 100;
+            playhead.style.left = percent + '%';
+        });
+
+        beatTimes.forEach(time => {
+            const marker = document.createElement('div');
+            marker.className = 'marker';
+            const percent = (time / duration) * 100;
+            marker.style.left = percent + '%';
+            timeline.appendChild(marker);
+        });
+    </script>
+{% endif %}
+</body>
+</html>
